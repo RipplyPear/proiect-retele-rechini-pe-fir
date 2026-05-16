@@ -67,3 +67,6 @@ Thumbs.db
 
 # JetBrains IDEs
 .idea/
+
+# Local proxy test data
+proxy_data/
