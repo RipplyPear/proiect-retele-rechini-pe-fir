@@ -291,7 +291,13 @@ async def main() -> None:
         elif args.scenario == "unavailable":
             await demo_destination_unavailable()
 
-    except (ConnectionError, TimeoutError, asyncio.TimeoutError, OSError, ValueError) as exc:
+    except (
+        ConnectionError,
+        TimeoutError,
+        asyncio.TimeoutError,
+        OSError,
+        ValueError,
+    ) as exc:
         print("\nDemo failed:")
         print(f"  {exc}")
         raise SystemExit(1) from exc
