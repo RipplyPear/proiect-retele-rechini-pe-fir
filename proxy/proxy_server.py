@@ -12,6 +12,23 @@ from pathlib import Path
 from typing import Any
 
 
+# Proxy-ul are două roluri:
+#
+#   1. Este server pentru clientul demo.
+#      Clientul se conectează la proxy pe PROXY_HOST:PROXY_PORT.
+#
+#   2. Este client pentru destination server.
+#      Proxy-ul se conectează la DESTINATION_HOST:DESTINATION_PORT.
+#
+# Local:
+#   DESTINATION_HOST=127.0.0.1
+#
+# În Docker Compose:
+#   DESTINATION_HOST=destination
+#
+# pentru că "destination" este numele serviciului Docker Compose.
+
+
 PROXY_HOST = os.getenv("PROXY_HOST", "0.0.0.0")
 PROXY_PORT = int(os.getenv("PROXY_PORT", "9000"))
 
@@ -19,10 +36,19 @@ DESTINATION_HOST = os.getenv("DESTINATION_HOST", "127.0.0.1")
 DESTINATION_PORT = int(os.getenv("DESTINATION_PORT", "9101"))
 DESTINATION_TIMEOUT = float(os.getenv("DESTINATION_TIMEOUT", "5"))
 
+# Directorul expus pentru operația proxy_read_file.
+#
+# resolve() transformă calea într-o cale absolută.
+# Asta ne ajută să prevenim path traversal, de exemplu "../../.env".
 PROXY_DATA_DIR = Path(os.getenv("PROXY_DATA_DIR", "proxy_data/public")).resolve()
 
+
+# Operații executate direct de proxy.
 ALLOWED_PROXY_OPERATIONS = {"proxy_ping", "proxy_read_file"}
+
+# Operații forwardate către destination server.
 ALLOWED_DESTINATION_OPERATIONS = {"echo", "uppercase", "delay_echo"}
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,16 +58,59 @@ logging.basicConfig(
 
 logger = logging.getLogger("proxy")
 
+
+# Când clientul trimite o cerere către destination:
+#   1. proxy-ul generează request_id
+#   2. memorează request_id -> client
+#   3. forwardează cererea către destination
+#   4. primește răspuns cu același request_id
+#   5. trimite răspunsul clientului corect
+#
+# Această mapare este importantă mai ales când răspunsurile vin out-of-order.
+
+
 pending_requests: dict[str, "ClientConnection"] = {}
 
 
+# Model conexiune client
 @dataclass(slots=True)
 class ClientConnection:
+    # reader: citim date primite de la client
     reader: asyncio.StreamReader
+
+    # writer: trimitem date către client
     writer: asyncio.StreamWriter
+
+    # peer: adresa clientului, utilă în loguri
     peer: str
+
+    # lock: previne scrieri simultane către același socket.
+    #
+    # Pentru că procesăm cereri în task-uri async, două răspunsuri ar putea fi
+    # generate aproape în același timp pentru același client.
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+    # closed: marcheză dacă acel client s-a deconectat.
     closed: bool = False
+
+
+# Răspunsurile proxy-ului către client au forma:
+#
+# Succes:
+# {
+#   "type": "RESPONSE",
+#   "request_id": "...",
+#   "status": "ok",
+#   "data": {...}
+# }
+#
+# Eroare:
+# {
+#   "type": "RESPONSE",
+#   "request_id": "...",
+#   "status": "error",
+#   "error": {"code": "...", "message": "..."}
+# }
 
 
 def make_response(
@@ -72,6 +141,8 @@ def make_error(
     code: str,
     message: str,
 ) -> dict[str, Any]:
+    """Scurtătură pentru construirea unui răspuns de eroare."""
+
     return make_response(
         request_id=request_id,
         status="error",
@@ -80,6 +151,15 @@ def make_error(
             "message": message,
         },
     )
+
+
+# Protocolul este JSON line-delimited:
+#   - un mesaj = un obiect JSON
+#   - finalul mesajului = "\n"
+#
+# De aceea trimitem mereu:
+#
+#   json + "\n"
 
 
 async def send_json(client: ClientConnection, message: dict[str, Any]) -> None:
@@ -93,7 +173,12 @@ async def send_json(client: ClientConnection, message: dict[str, Any]) -> None:
         await client.writer.drain()
 
 
+# Parsare si validare
+
+
 def parse_json_line(line: bytes) -> dict[str, Any]:
+    """Transformă o linie primită pe socket într-un dicționar Python."""
+
     try:
         decoded = line.decode("utf-8").strip()
         message = json.loads(decoded)
@@ -109,6 +194,17 @@ def parse_json_line(line: bytes) -> dict[str, Any]:
 
 
 def validate_client_request(message: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
+    """Verifică forma mesajului Client -> Proxy.
+
+    Cererea trebuie să fie:
+    {
+        "type": "REQUEST",
+        "target": "proxy" sau "destination",
+        "operation": "...",
+        "payload": {...}
+    }
+    """
+
     if message.get("type") != "REQUEST":
         raise ValueError("Field 'type' must be 'REQUEST'")
 
@@ -129,6 +225,15 @@ def validate_client_request(message: dict[str, Any]) -> tuple[str, str, dict[str
         raise ValueError("Field 'payload' must be an object")
 
     return target, operation, payload
+
+
+# Aici ajung cererile cu:
+#
+#   target = "proxy"
+#
+# Operații:
+#   proxy_ping      -> verifică dacă proxy-ul răspunde
+#   proxy_read_file -> citește un fișier din directorul expus
 
 
 async def handle_proxy_operation(
@@ -176,8 +281,13 @@ async def handle_proxy_operation(
             )
             return
 
+        # Construim calea finală a fișierului.
         requested_path = (PROXY_DATA_DIR / filename).resolve()
 
+        # Protecție path traversal:
+        #
+        # Dacă utilizatorul trimite "../../secret.txt", requested_path ar ieși
+        # din PROXY_DATA_DIR. relative_to(...) detectează asta.
         try:
             requested_path.relative_to(PROXY_DATA_DIR)
         except ValueError:
@@ -228,6 +338,17 @@ async def handle_proxy_operation(
         )
 
 
+# Această funcție se ocupă strict de comunicarea cu destination server.
+#
+# Ea:
+#   1. deschide conexiune TCP către destination
+#   2. trimite FORWARDED_REQUEST
+#   3. așteaptă DESTINATION_RESPONSE
+#   4. întoarce răspunsul ca dicționar Python
+#
+# Dacă destination nu poate fi contactat, ridică ConnectionError.
+
+
 async def call_destination_server(
     forwarded_request: dict[str, Any],
 ) -> dict[str, Any]:
@@ -265,6 +386,18 @@ async def call_destination_server(
         await writer.wait_closed()
 
 
+# Aceasta este funcția centrală pentru target="destination".
+#
+# Pași:
+#   1. verifică operația
+#   2. salvează request_id -> client
+#   3. construiește FORWARDED_REQUEST
+#   4. trimite către destination
+#   5. validează răspunsul de la destination
+#   6. trimite răspunsul clientului corect
+#   7. curăță maparea request_id -> client
+
+
 async def forward_to_destination(
     client: ClientConnection,
     request_id: str,
@@ -282,8 +415,12 @@ async def forward_to_destination(
         )
         return
 
+    # Maparea cerută de proiect.
     pending_requests[request_id] = client
 
+    # Mesajul forwardat către destination.
+    #
+    # Observă că proxy-ul adaugă request_id.
     forwarded_request = {
         "type": "FORWARDED_REQUEST",
         "request_id": request_id,
@@ -294,6 +431,7 @@ async def forward_to_destination(
     try:
         destination_response = await call_destination_server(forwarded_request)
 
+        # Destination trebuie să răspundă cu tipul corect de mesaj.
         if destination_response.get("type") != "DESTINATION_RESPONSE":
             await send_json(
                 client,
@@ -305,6 +443,9 @@ async def forward_to_destination(
             )
             return
 
+        # Destination trebuie să păstreze același request_id.
+        #
+        # Dacă request_id-ul lipsește sau diferă, proxy-ul refuză răspunsul.
         if destination_response.get("request_id") != request_id:
             await send_json(
                 client,
@@ -316,6 +457,7 @@ async def forward_to_destination(
             )
             return
 
+        # Găsim clientul care a făcut cererea inițială.
         mapped_client = pending_requests.get(request_id)
 
         if mapped_client is None or mapped_client.closed:
@@ -336,6 +478,7 @@ async def forward_to_destination(
                 ),
             )
         else:
+            # Dacă destination trimite o eroare, o propagăm către client.
             await send_json(
                 mapped_client,
                 make_response(
@@ -352,6 +495,7 @@ async def forward_to_destination(
             )
 
     except (ConnectionError, OSError, asyncio.TimeoutError):
+        # Cazul în care destination este oprit sau inaccesibil.
         if not client.closed:
             await send_json(
                 client,
@@ -363,6 +507,7 @@ async def forward_to_destination(
             )
 
     except ValueError as exc:
+        # Cazul în care destination a răspuns cu JSON invalid sau format greșit.
         if not client.closed:
             await send_json(
                 client,
@@ -374,7 +519,22 @@ async def forward_to_destination(
             )
 
     finally:
+        # Cleanup obligatoriu.
+        #
+        # Indiferent dacă cererea a reușit sau a eșuat, ștergem maparea.
         pending_requests.pop(request_id, None)
+
+
+# Această funcție procesează o singură linie primită de la client.
+#
+# Pași:
+#   1. parsează JSON
+#   2. validează structura
+#   3. generează request_id
+#   4. decide target-ul:
+#        - proxy
+#        - destination
+#        - invalid
 
 
 async def handle_client_message(client: ClientConnection, line: bytes) -> None:
@@ -382,6 +542,7 @@ async def handle_client_message(client: ClientConnection, line: bytes) -> None:
         message = parse_json_line(line)
         target, operation, payload = validate_client_request(message)
     except ValueError as exc:
+        # Nu avem request_id pentru cereri invalide la nivel de parsare/validare.
         await send_json(
             client,
             make_error(
@@ -392,6 +553,7 @@ async def handle_client_message(client: ClientConnection, line: bytes) -> None:
         )
         return
 
+    # Fiecare cerere validă primește un UUID.
     request_id = str(uuid.uuid4())
 
     logger.info(
@@ -418,6 +580,15 @@ async def handle_client_message(client: ClientConnection, line: bytes) -> None:
             f"Target '{target}' is not supported",
         ),
     )
+
+
+# asyncio.start_server(...) apelează această funcție pentru fiecare client.
+#
+# Funcția citește mesaje de la client.
+# Pentru fiecare mesaj, pornește un task separat.
+#
+# De ce create_task?
+#   Ca o cerere lentă să nu blocheze citirea/servirea altor cereri.
 
 
 async def handle_client(
@@ -450,6 +621,9 @@ async def handle_client(
     finally:
         client.closed = True
 
+        # Dacă acest client avea cereri în așteptare, le curățăm.
+        #
+        # Astfel nu rămân mapări vechi request_id -> client în memorie.
         for request_id, mapped_client in list(pending_requests.items()):
             if mapped_client is client:
                 pending_requests.pop(request_id, None)
@@ -464,6 +638,7 @@ async def handle_client(
 
 
 async def main() -> None:
+    # Creează directorul expus pentru proxy_read_file dacă nu există.
     PROXY_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     server = await asyncio.start_server(

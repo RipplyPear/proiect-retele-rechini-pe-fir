@@ -242,18 +242,18 @@ python3 client/demo_client.py
 
 ## 11. Checklist final
 
-- [ ] Proxy porneste in Docker
-- [ ] Destination server porneste in Docker
-- [ ] Cel putin doi clienti se pot conecta
-- [ ] Cererile primesc request_id unic
-- [ ] Proxy-ul tine maparea request_id -> client
-- [ ] Raspunsurile sunt livrate clientului corect
-- [ ] Exista demo cu raspunsuri out-of-order
-- [ ] Exista demo cu cerere directa catre proxy
-- [ ] Exista demo cu server destinatie indisponibil
-- [ ] README contine instructiuni clare
-- [ ] `docker-compose.yml` contine servicii pentru proxy si destination
-- [ ] Exista Dockerfile pentru proxy
-- [ ] Exista Dockerfile pentru destination
-- [ ] README nu mai contine referinte la video, doar la demo live
+- [x] Proxy porneste in Docker
+- [x] Destination server porneste in Docker
+- [x] Cel putin doi clienti se pot conecta
+- [x] Cererile primesc request_id unic
+- [x] Proxy-ul tine maparea request_id -> client
+- [x] Raspunsurile sunt livrate clientului corect
+- [x] Exista demo cu raspunsuri out-of-order
+- [x] Exista demo cu cerere directa catre proxy
+- [x] Exista demo cu server destinatie indisponibil
+- [x] README contine instructiuni clare
+- [x] `docker-compose.yml` contine servicii pentru proxy si destination
+- [x] Exista Dockerfile pentru proxy
+- [x] Exista Dockerfile pentru destination
+- [x] README nu mai contine referinte la video, doar la demo live
 

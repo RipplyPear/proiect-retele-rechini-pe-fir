@@ -9,10 +9,27 @@ import os
 from typing import Any
 
 
+
+# Destination server este serverul final care procesează cererile forwardate
+# de proxy.
+#
+# El nu primește mesaje direct de la clientul demo în fluxul normal.
+# Fluxul normal este:
+#
+#   Client -> Proxy -> Destination -> Proxy -> Client
+#
+# În Docker, destination ascultă pe 0.0.0.0:9101 ca să fie accesibil din
+# containerul proxy.
+
+
 DESTINATION_HOST = os.getenv("DESTINATION_HOST", "0.0.0.0")
 DESTINATION_PORT = int(os.getenv("DESTINATION_PORT", "9101"))
 
+# Operațiile pe care destination server știe să le execute.
 ALLOWED_OPERATIONS = {"echo", "uppercase", "delay_echo"}
+
+
+# Logging
 
 logging.basicConfig(
     level=logging.INFO,
@@ -21,6 +38,30 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger("destination")
+
+
+# Destination răspunde proxy-ului cu mesaje de forma:
+#
+# {
+#   "type": "DESTINATION_RESPONSE",
+#   "request_id": "...",
+#   "status": "ok",
+#   "data": {...}
+# }
+#
+# sau:
+#
+# {
+#   "type": "DESTINATION_RESPONSE",
+#   "request_id": "...",
+#   "status": "error",
+#   "error": {"code": "...", "message": "..."}
+# }
+#
+# Foarte important:
+#   request_id-ul primit de la proxy trebuie păstrat în răspuns.
+#
+# Altfel proxy-ul nu ar putea corela răspunsul cu clientul corect.
 
 
 def make_destination_response(
@@ -51,6 +92,8 @@ def make_error(
     code: str,
     message: str,
 ) -> dict[str, Any]:
+    """Scurtătură pentru construirea unui răspuns de eroare."""
+
     return make_destination_response(
         request_id=request_id,
         status="error",
@@ -61,7 +104,24 @@ def make_error(
     )
 
 
+
+# Protocolul este JSON line-delimited:
+#   - fiecare mesaj este un obiect JSON
+#   - fiecare mesaj se termină cu "\n"
+#
+# Destination primește de la proxy un mesaj de tip:
+#
+# {
+#   "type": "FORWARDED_REQUEST",
+#   "request_id": "...",
+#   "operation": "...",
+#   "payload": {...}
+# }
+
+
 def parse_json_line(line: bytes) -> dict[str, Any]:
+    """Transformă o linie de bytes primită pe socket într-un dicționar."""
+
     try:
         decoded = line.decode("utf-8").strip()
         message = json.loads(decoded)
@@ -79,6 +139,12 @@ def parse_json_line(line: bytes) -> dict[str, Any]:
 def validate_forwarded_request(
     message: dict[str, Any],
 ) -> tuple[str, str, dict[str, Any]]:
+    """Verifică forma mesajului Proxy -> Destination.
+
+    Returnează valorile importante:
+      request_id, operation, payload
+    """
+
     if message.get("type") != "FORWARDED_REQUEST":
         raise ValueError("Field 'type' must be 'FORWARDED_REQUEST'")
 
@@ -99,6 +165,17 @@ def validate_forwarded_request(
         raise ValueError("Field 'payload' must be an object")
 
     return request_id, operation, payload
+
+
+# Această funcție conține logica efectivă a serverului destination.
+#
+# Operații:
+#   echo       -> returnează textul primit
+#   uppercase  -> returnează textul cu litere mari
+#   delay_echo -> așteaptă delay_ms, apoi returnează textul
+#
+# delay_echo este important pentru demo-ul de out-of-order:
+#   - o cerere lentă poate răspunde după o cerere rapidă trimisă ulterior.
 
 
 async def execute_operation(
@@ -137,6 +214,7 @@ async def execute_operation(
         text = payload.get("text", "")
         delay_ms = payload.get("delay_ms", 0)
 
+        # delay_ms trebuie să fie număr pozitiv sau zero.
         if not isinstance(delay_ms, int | float) or delay_ms < 0:
             return make_error(
                 request_id,
@@ -144,6 +222,10 @@ async def execute_operation(
                 "delay_echo requires payload.delay_ms to be a non-negative number",
             )
 
+        # Aici apare întârzierea artificială.
+        #
+        # await asyncio.sleep(...) nu blochează întreg serverul.
+        # Cât timp această cerere doarme, event loop-ul poate procesa alte cereri.
         await asyncio.sleep(delay_ms / 1000)
 
         return make_destination_response(
@@ -155,6 +237,8 @@ async def execute_operation(
             },
         )
 
+    # Teoretic nu ajungem aici din cauza verificării ALLOWED_OPERATIONS,
+    # dar păstrăm fallback-ul pentru siguranță.
     return make_error(
         request_id,
         "UNKNOWN_OPERATION",
@@ -166,9 +250,17 @@ async def send_json(
     writer: asyncio.StreamWriter,
     message: dict[str, Any],
 ) -> None:
+    """Trimite un dicționar ca JSON line-delimited."""
+
     line = json.dumps(message, ensure_ascii=False, separators=(",", ":")) + "\n"
     writer.write(line.encode("utf-8"))
     await writer.drain()
+
+
+
+# În implementarea curentă, proxy-ul deschide o conexiune nouă către destination
+# pentru fiecare cerere. Destination citește o linie, procesează cererea,
+# trimite un răspuns și închide conexiunea.
 
 
 async def handle_proxy_connection(
@@ -181,6 +273,7 @@ async def handle_proxy_connection(
     logger.info("Proxy connected: %s", peer)
 
     try:
+        # Citim o singură cerere JSON.
         line = await reader.readline()
 
         if not line:
@@ -190,6 +283,9 @@ async def handle_proxy_connection(
             message = parse_json_line(line)
             request_id, operation, payload = validate_forwarded_request(message)
         except ValueError as exc:
+            # Dacă mesajul primit de la proxy este invalid, răspundem controlat.
+            #
+            # Nu avem request_id valid, deci trimitem request_id = None.
             await send_json(
                 writer,
                 make_error(
@@ -226,6 +322,9 @@ async def handle_proxy_connection(
 
 
 async def main() -> None:
+    # asyncio.start_server pornește un server TCP.
+    #
+    # Pentru fiecare conexiune nouă, va apela handle_proxy_connection.
     server = await asyncio.start_server(
         handle_proxy_connection,
         DESTINATION_HOST,

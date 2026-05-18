@@ -179,13 +179,13 @@ Trimite o cerere cu target invalid. Proxy-ul trebuie sa raspunda controlat cu er
 
 ### Destination server indisponibil
 
-In terminalul in care ruleaza Docker Compose, lasati proxy-ul pornit si opriti doar destination server:
+In terminalul in care ruleaza Docker Compose, lasam proxy-ul pornit si oprim doar destination server:
 
 ```bash
 docker compose stop destination
 ```
 
-Apoi rulati:
+Apoi rulam:
 
 ```bash
 python3 client/demo_client.py unavailable
@@ -203,7 +203,7 @@ Raspunsul asteptat este o eroare controlata:
 }
 ```
 
-Dupa test, reporniti destination server:
+Dupa test, repornim destination server:
 
 ```bash
 docker compose start destination
