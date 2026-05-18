@@ -1,0 +1,27 @@
+services:
+  destination:
+    build:
+      context: .
+      dockerfile: destination/Dockerfile
+    container_name: rechini-destination
+    environment:
+      DESTINATION_HOST: 0.0.0.0
+      DESTINATION_PORT: 9101
+    ports:
+      - "9101:9101"
+
+  proxy:
+    build:
+      context: .
+      dockerfile: proxy/Dockerfile
+    container_name: rechini-proxy
+    environment:
+      PROXY_HOST: 0.0.0.0
+      PROXY_PORT: 9000
+      DESTINATION_HOST: destination
+      DESTINATION_PORT: 9101
+      PROXY_DATA_DIR: /app/proxy_data/public
+    ports:
+      - "9000:9000"
+    depends_on:
+      - destination
