@@ -2,158 +2,75 @@
 
 Proiect la disciplina **Retele de Calculatoare**.
 
-Tema implementata: **27 – Proxy pentru intermedierea comunicatiei**.
-
-## Echipa
+Echipa: **Rechini pe fir**
 
 - Mincinoiu Dragos-Matei
 - Ionescu Sabina
 - Mihailescu Valter-Ioan
 
-## Descriere
+## 1. Descriere
 
-Aplicatia implementeaza un server proxy care intermediaza comunicatia intre clienti si un server destinatie.
+Proiectul implementeaza o aplicatie distribuita de tip client-proxy-server.
 
-Clientii se conecteaza la proxy si trimit cereri care contin serverul destinatie, operatia dorita si datele necesare. Proxy-ul genereaza un identificator unic pentru fiecare cerere, memoreaza asocierea dintre identificator si client, transmite cererea catre serverul destinatie si apoi livreaza raspunsul inapoi clientului corect.
+Clientul nu comunica direct cu serverul destinatie. In schimb, clientul trimite cereri catre un server proxy. Proxy-ul genereaza un identificator unic pentru fiecare cerere, memoreaza asocierea dintre identificator si client, trimite cererea mai departe catre serverul destinatie, apoi livreaza raspunsul inapoi clientului corect.
 
-Proxy-ul poate raspunde si la cereri adresate lui direct, de exemplu citirea unui fisier local dintr-un director expus.
-
-## Functionalitati vizate
-
-- server proxy concurent;
-- un server destinatie simplu;
-- cel putin doi clienti conectati la proxy;
-- generare `request_id` unic pentru fiecare cerere;
-- mapare `request_id -> client`;
-- forward proxy -> server destinatie;
-- raspuns server destinatie -> proxy -> client;
-- corelarea corecta a raspunsurilor cu clientii;
-- cereri directe catre proxy;
-- tratarea serverului destinatie indisponibil;
-- tratarea cererilor invalide;
-- demo cu raspunsuri out-of-order.
-
-## Tehnologii folosite
-
-- Python 3
-- asyncio
-- TCP sockets
-- JSON line-delimited protocol
-- Docker
-- Docker Compose
-- Wireshark pentru inspectarea traficului
-
-## Arhitectura
-
-```mermaid
-flowchart LR
-    C1[Client A] --> P[Proxy Server]
-    C2[Client B] --> P
-    P --> D[Destination Server]
-    D --> P
-    P --> C1
-    P --> C2
-    P --> F[Proxy local files]
-```
-
-## Structura proiectului
+Flux general:
 
 ```text
-.
-├── client/
-│   └── demo_client.py
-├── destination/
-│   └── destination_server.py
-├── proxy/
-│   └── proxy_server.py
-├── docs/
-│   ├── project_decisions.md
-│   └── tasks/
-│       ├── 00-general-specs.md
-│       └── 27-proxy-pentru-intermedierea-comunicatiei.md
-├── docker-compose.yml
-├── .gitignore
-└── README.md
+Client -> Proxy -> Destination Server -> Proxy -> Client
 ```
 
-## Porturi folosite
+Proxy-ul poate raspunde si la cereri adresate lui direct, fara sa le trimita mai departe catre serverul destinatie.
 
-| Componenta | Port |
-|---|---:|
-| Proxy server | 9000 |
-| Destination server | 9101 |
+## 2. Tehnologii folosite
 
-## Protocol
+* Python 3
+* asyncio
+* TCP sockets
+* JSON line-delimited protocol
+* Docker
+* Docker Compose
+* Wireshark pentru inspectarea traficului
 
-Mesajele sunt trimise ca JSON pe o singura linie, terminate cu newline.
+## 3. Arhitectura
 
-### Client -> Proxy
+```text
++----------+        TCP/JSON        +--------------+        TCP/JSON        +--------------------+
+| Client A | ---------------------> | Proxy Server | ---------------------> | Destination Server |
++----------+                        +--------------+                        +--------------------+
+                                           |
++----------+        TCP/JSON               |
+| Client B | -----------------------------+
++----------+
 
-```json
-{"type":"REQUEST","target":"destination","operation":"delay_echo","payload":{"text":"salut","delay_ms":2000}}
+Destination Server -> Proxy Server -> Client corect
 ```
 
-### Proxy -> Destination
+Componente:
 
-```json
-{"type":"FORWARDED_REQUEST","request_id":"uuid","operation":"delay_echo","payload":{"text":"salut","delay_ms":2000}}
+* `client/demo_client.py` – client demo pentru rularea scenariilor
+* `proxy/proxy_server.py` – serverul proxy
+* `destination/destination_server.py` – serverul destinatie
+* `docker-compose.yml` – porneste serviciile `proxy` si `destination`
+
+## 4. Porturi folosite
+
+| Componenta         |   Port |
+| ------------------ | -----: |
+| Proxy Server       | `9000` |
+| Destination Server | `9101` |
+
+In Docker Compose, proxy-ul contacteaza serverul destinatie folosind numele serviciului:
+
+```text
+destination:9101
 ```
 
-### Destination -> Proxy
+Nu foloseste `127.0.0.1:9101` in interiorul containerului, deoarece `127.0.0.1` ar indica spre containerul proxy, nu spre containerul destination.
 
-```json
-{"type":"DESTINATION_RESPONSE","request_id":"uuid","status":"ok","data":{"text":"salut"}}
-```
+## 5. Rulare proiect
 
-### Proxy -> Client
-
-```json
-{"type":"RESPONSE","request_id":"uuid","status":"ok","data":{"text":"salut"}}
-```
-
-### Raspuns de eroare
-
-```json
-{"type":"RESPONSE","request_id":"uuid","status":"error","error":{"code":"DESTINATION_UNAVAILABLE","message":"Server destination unavailable"}}
-```
-
-## Operatii suportate
-
-### Operatii pe serverul destinatie
-
-| Operatie | Descriere |
-|---|---|
-| `echo` | returneaza textul primit |
-| `uppercase` | returneaza textul cu litere mari |
-| `delay_echo` | asteapta `delay_ms`, apoi returneaza textul |
-
-### Operatii directe pe proxy
-
-| Operatie | Descriere |
-|---|---|
-| `proxy_ping` | verifica daca proxy-ul raspunde |
-| `proxy_read_file` | citeste un fisier din directorul expus al proxy-ului |
-
-## Coduri de eroare
-
-| Cod | Descriere |
-|---|---|
-| `INVALID_REQUEST` | mesaj JSON invalid sau campuri lipsa |
-| `UNKNOWN_OPERATION` | operatia nu este suportata |
-| `DESTINATION_UNAVAILABLE` | serverul destinatie nu poate fi contactat |
-| `INVALID_RESPONSE_ID` | raspunsul serverului destinatie nu contine un `request_id` valid |
-| `CLIENT_DISCONNECTED` | clientul s-a deconectat inainte de primirea raspunsului |
-
-## Cerinte de instalare
-
-Sunt necesare:
-
-- Python 3.10+;
-- Docker;
-- Docker Compose;
-- optional: Wireshark pentru inspectarea traficului.
-
-## Rulare cu Docker Compose
+### 5.1 Pornire servere
 
 Din radacina proiectului:
 
@@ -161,122 +78,368 @@ Din radacina proiectului:
 docker compose up --build
 ```
 
-Comanda porneste serviciile definite in `docker-compose.yml`.
+Aceasta comanda porneste:
 
-Dupa pornire, proxy-ul este disponibil pe:
+* containerul `rechini-proxy`
+* containerul `rechini-destination`
 
-```text
-localhost:9000
+Proxy-ul va asculta pe portul `9000`, iar destination server pe portul `9101`.
+
+### 5.2 Rulare client demo
+
+Intr-un terminal separat:
+
+```bash
+python3 client/demo_client.py full
 ```
 
-Serverul destinatie ruleaza pe:
+Sau:
 
-```text
-localhost:9101
+```bash
+source .venv/bin/activate
+python3 client/demo_client.py full
 ```
 
-Pentru oprire:
+### 5.3 Oprire proiect
 
 ```bash
 docker compose down
 ```
 
-## Rulare client demo
+## 6. Scenarii demo
 
-In alt terminal, din radacina proiectului:
+Clientul demo suporta mai multe scenarii.
+
+### Demo complet
 
 ```bash
-python3 client/demo_client.py
+python3 client/demo_client.py full
 ```
 
-## Scenariu demonstrativ
+Acest scenariu ruleaza:
 
-Demo-ul acopera urmatoarele etape:
+1. `proxy_ping`
+2. `echo` prin destination server
+3. `uppercase` prin destination server
+4. `delay_echo` cu raspunsuri out-of-order
+5. `proxy_read_file`
+6. target invalid
 
-1. Pornirea proxy-ului si a serverului destinatie cu:
+### Cerere directa catre proxy
 
-   ```bash
-   docker compose up --build
-   ```
+```bash
+python3 client/demo_client.py ping
+```
 
-2. Pornirea a doi clienti.
+Trimite o cerere `proxy_ping` catre proxy si verifica daca acesta raspunde.
 
-3. Clientul A trimite o cerere `delay_echo` cu delay mai mare.
+### Cereri catre destination server
 
-4. Clientul B trimite o cerere `delay_echo` cu delay mai mic.
+```bash
+python3 client/demo_client.py destination
+```
 
-5. Raspunsul pentru Clientul B ajunge primul, desi cererea Clientului A a fost trimisa inainte.
+Trimite cereri `echo` si `uppercase` prin proxy catre destination server.
 
-6. Proxy-ul livreaza fiecare raspuns clientului corect folosind `request_id`.
+### Raspunsuri out-of-order
 
-7. Se trimite o cerere directa catre proxy, de tip `proxy_read_file`.
+```bash
+python3 client/demo_client.py out-of-order
+```
 
-8. Se trimite o cerere catre un server/target invalid.
-
-9. Proxy-ul raspunde controlat cu eroarea `DESTINATION_UNAVAILABLE`.
-
-## Verificare cu Wireshark
-
-Pentru inspectarea traficului, se poate folosi Wireshark cu unul dintre filtrele:
+Clientul A trimite primul o cerere lenta:
 
 ```text
-tcp.port == 9000
+delay_ms = 3000
 ```
 
-sau:
+Clientul B trimite al doilea o cerere rapida:
+
+```text
+delay_ms = 500
+```
+
+Rezultatul corect este ca raspunsul Clientului B apare primul, desi cererea lui a fost trimisa dupa cererea Clientului A. Proxy-ul livreaza raspunsurile corect folosind `request_id`.
+
+### Citire fisier din proxy
+
+```bash
+python3 client/demo_client.py read-file
+```
+
+Trimite o cerere `proxy_read_file` catre proxy. Proxy-ul citeste fisierul `sample.txt` din directorul expus si returneaza continutul.
+
+### Target invalid
+
+```bash
+python3 client/demo_client.py invalid-target
+```
+
+Trimite o cerere cu target invalid. Proxy-ul trebuie sa raspunda controlat cu eroare.
+
+### Destination server indisponibil
+
+In terminalul in care ruleaza Docker Compose, lasati proxy-ul pornit si opriti doar destination server:
+
+```bash
+docker compose stop destination
+```
+
+Apoi rulati:
+
+```bash
+python3 client/demo_client.py unavailable
+```
+
+Raspunsul asteptat este o eroare controlata:
+
+```json
+{
+  "status": "error",
+  "error": {
+    "code": "DESTINATION_UNAVAILABLE",
+    "message": "Server destination unavailable"
+  }
+}
+```
+
+Dupa test, reporniti destination server:
+
+```bash
+docker compose start destination
+```
+
+## 7. Protocolul aplicatiei
+
+Aplicatia foloseste un protocol text peste TCP.
+
+Fiecare mesaj este:
+
+* un obiect JSON
+* scris pe o singura linie
+* terminat cu newline (`\n`)
+
+Acest format permite citirea mesajelor cu `readline()`.
+
+### 7.1 Client -> Proxy
+
+```json
+{"type":"REQUEST","target":"destination","operation":"delay_echo","payload":{"text":"salut","delay_ms":2000}}
+```
+
+Campuri:
+
+| Camp        | Descriere                                     |
+| ----------- | --------------------------------------------- |
+| `type`      | tipul mesajului; pentru client este `REQUEST` |
+| `target`    | `proxy` sau `destination`                     |
+| `operation` | operatia ceruta                               |
+| `payload`   | datele necesare operatiei                     |
+
+### 7.2 Proxy -> Destination
+
+```json
+{"type":"FORWARDED_REQUEST","request_id":"uuid","operation":"delay_echo","payload":{"text":"salut","delay_ms":2000}}
+```
+
+Proxy-ul adauga campul `request_id`.
+
+### 7.3 Destination -> Proxy
+
+```json
+{"type":"DESTINATION_RESPONSE","request_id":"uuid","status":"ok","data":{"text":"salut","delay_ms":2000}}
+```
+
+Destination server raspunde cu acelasi `request_id`.
+
+### 7.4 Proxy -> Client
+
+```json
+{"type":"RESPONSE","request_id":"uuid","status":"ok","data":{"text":"salut","delay_ms":2000}}
+```
+
+Proxy-ul foloseste `request_id` pentru a trimite raspunsul catre clientul corect.
+
+### 7.5 Raspuns de eroare
+
+```json
+{"type":"RESPONSE","request_id":"uuid","status":"error","error":{"code":"DESTINATION_UNAVAILABLE","message":"Server destination unavailable"}}
+```
+
+## 8. Operatii suportate
+
+### 8.1 Operatii executate direct de proxy
+
+| Operatie          | Descriere                                            |
+| ----------------- | ---------------------------------------------------- |
+| `proxy_ping`      | verifica daca proxy-ul raspunde                      |
+| `proxy_read_file` | citeste un fisier din directorul expus al proxy-ului |
+
+Exemplu `proxy_ping`:
+
+```json
+{"type":"REQUEST","target":"proxy","operation":"proxy_ping","payload":{}}
+```
+
+Exemplu `proxy_read_file`:
+
+```json
+{"type":"REQUEST","target":"proxy","operation":"proxy_read_file","payload":{"filename":"sample.txt"}}
+```
+
+### 8.2 Operatii trimise catre destination server
+
+| Operatie     | Descriere                                   |
+| ------------ | ------------------------------------------- |
+| `echo`       | returneaza textul primit                    |
+| `uppercase`  | returneaza textul cu litere mari            |
+| `delay_echo` | asteapta `delay_ms`, apoi returneaza textul |
+
+Exemplu `echo`:
+
+```json
+{"type":"REQUEST","target":"destination","operation":"echo","payload":{"text":"salut"}}
+```
+
+Exemplu `uppercase`:
+
+```json
+{"type":"REQUEST","target":"destination","operation":"uppercase","payload":{"text":"salut"}}
+```
+
+Exemplu `delay_echo`:
+
+```json
+{"type":"REQUEST","target":"destination","operation":"delay_echo","payload":{"text":"salut","delay_ms":1000}}
+```
+
+## 9. Coduri de eroare
+
+| Cod                       | Cand apare                                             |
+| ------------------------- | ------------------------------------------------------ |
+| `INVALID_REQUEST`         | mesaj JSON invalid, campuri lipsa sau target invalid   |
+| `UNKNOWN_OPERATION`       | operatia nu este suportata                             |
+| `DESTINATION_UNAVAILABLE` | serverul destinatie nu poate fi contactat              |
+| `INVALID_RESPONSE_ID`     | destination server raspunde fara un `request_id` valid |
+| `CLIENT_DISCONNECTED`     | clientul s-a deconectat inainte de raspuns             |
+
+## 10. Cum functioneaza request_id
+
+Pentru fiecare cerere valida, proxy-ul genereaza un identificator unic (`request_id`).
+
+Proxy-ul memoreaza intern asocierea:
+
+```text
+request_id -> client
+```
+
+Aceasta mapare este necesara pentru ca mai multi clienti pot trimite cereri simultan, iar raspunsurile de la destination server pot veni in alta ordine decat cererile.
+
+Exemplu:
+
+```text
+Client A trimite delay_echo cu 3000 ms
+Client B trimite delay_echo cu 500 ms
+
+Destination raspunde mai intai pentru Client B.
+Proxy-ul foloseste request_id-ul ca sa trimita raspunsul catre Client B.
+Apoi trimite raspunsul lent catre Client A.
+```
+
+Astfel, raspunsurile sunt corelate corect chiar si in scenarii out-of-order.
+
+## 11. Concurenta
+
+Proxy-ul si destination server-ul folosesc `asyncio`.
+
+Proxy-ul poate accepta mai multi clienti si poate procesa mai multe cereri in paralel. Cand o cerere asteapta raspuns de la destination server, event loop-ul poate continua sa proceseze alte conexiuni.
+
+Acest comportament permite scenariul cu raspunsuri out-of-order.
+
+## 12. Inspectare trafic cu Wireshark
+
+Pentru observarea traficului, se poate folosi Wireshark.
+
+Filtru recomandat:
 
 ```text
 tcp.port == 9000 || tcp.port == 9101
 ```
 
-In pachetele TCP se pot observa mesajele JSON trimise intre client, proxy si serverul destinatie, inclusiv campul `request_id`.
+Portul `9000` este folosit pentru comunicarea client -> proxy.
 
-## Documentatie tehnica
+Portul `9101` este folosit pentru comunicarea proxy -> destination server.
 
-Deciziile de arhitectura, protocolul, porturile, scenariile demo si impartirea responsabilitatilor sunt centralizate in:
+In payload-ul TCP se pot observa mesajele JSON trimise intre componente.
 
-```text
-docs/project_decisions.md
-```
-
-Cerintele originale ale proiectului sunt pastrate in:
+## 13. Structura proiectului
 
 ```text
-docs/tasks/
+.
+├── client/
+│   └── demo_client.py
+├── destination/
+│   ├── destination_server.py
+│   └── Dockerfile
+├── proxy/
+│   ├── proxy_server.py
+│   └── Dockerfile
+├── docs/
+│   └── ...
+├── docker-compose.yml
+└── README.md
 ```
 
-## Impartirea responsabilitatilor
+## 14. Contributii
 
-| Membru | Responsabilitate principala | Detalii |
-|---|---|---|
-| Mincinoiu Dragos-Matei | Proxy server | request_id, mapare id -> client, forward |
-| Ionescu Sabina | Destination server + Docker | operatii, delay_echo, docker-compose |
-| Mihailescu Valter-Ioan | Client demo + documentatie | scenarii demo, protocol, README |
+| Membru                 | Responsabilitate principala  |
+| ---------------------- | ---------------------------- |
+| Mincinoiu Dragos-Matei | Proxy server                 |
+| Ionescu Sabina         | Destination server si Docker |
+| Mihailescu Valter-Ioan | Client demo si documentatie  |
 
-## Demo live
+## 15. Verificari utile pentru dezvoltare
 
-Conform actualizarii cerintelor de seminar, proiectul va fi demonstrat live, fara video demonstrativ, folosind pasii de mai jos:
+Verificare sintaxa Python:
 
-1. Pornire servicii:
+```bash
+python3 -m py_compile proxy/proxy_server.py destination/destination_server.py client/demo_client.py
+```
+
+Verificare Ruff:
+
+```bash
+ruff check proxy/proxy_server.py destination/destination_server.py client/demo_client.py
+```
+
+Verificare Docker Compose:
+
+```bash
+docker compose config
+```
+
+Build si rulare:
+
 ```bash
 docker compose up --build
 ```
 
-2. Rulare client demo:
-``` bash
-python3 client/demo_client.py
-```
+## 16. Probleme posibile
 
-3. Scenariul demonstrat:
-- doi clienti conectati la proxy;
-- cereri simultane catre acelasi server destinatie;
-- raspunsuri out-of-order;
-- corelare raspuns-client prin request_id;
-- cerere directa catre proxy;
-- target invalid / server destinatie indisponibil.
+### Port deja ocupat
 
-## Status proiect
+Daca portul `9000` sau `9101` este deja folosit, opriti procesul care foloseste portul sau modificati porturile in `docker-compose.yml`.
+
+### Destination indisponibil
+
+Daca proxy-ul nu poate contacta destination server, clientul primeste eroarea:
 
 ```text
-In lucru
+DESTINATION_UNAVAILABLE
 ```
+
+### Diferenta dintre localhost si Docker
+
+Local, `127.0.0.1` inseamna calculatorul curent.
+
+In interiorul unui container Docker, `127.0.0.1` inseamna containerul curent. De aceea, proxy-ul foloseste `destination` ca host pentru a contacta containerul destination in reteaua Docker Compose.
