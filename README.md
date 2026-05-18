@@ -93,13 +93,6 @@ Intr-un terminal separat:
 python3 client/demo_client.py full
 ```
 
-Sau:
-
-```bash
-source .venv/bin/activate
-python3 client/demo_client.py full
-```
-
 ### 5.3 Oprire proiect
 
 ```bash

@@ -9,7 +9,6 @@ import os
 from typing import Any
 
 
-
 # Destination server este serverul final care procesează cererile forwardate
 # de proxy.
 #
@@ -102,7 +101,6 @@ def make_error(
             "message": message,
         },
     )
-
 
 
 # Protocolul este JSON line-delimited:
@@ -255,7 +253,6 @@ async def send_json(
     line = json.dumps(message, ensure_ascii=False, separators=(",", ":")) + "\n"
     writer.write(line.encode("utf-8"))
     await writer.drain()
-
 
 
 # În implementarea curentă, proxy-ul deschide o conexiune nouă către destination

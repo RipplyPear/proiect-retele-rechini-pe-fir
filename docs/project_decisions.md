@@ -160,11 +160,11 @@ Dupa inceperea implementarii, protocolul JSON se modifica doar daca sunt de acor
 
 ## 9. Impartire pe membri
 
-| Membru | Responsabilitate principala | Livrabile | Detalii |
-|---|---|---|---|
-| Mincinoiu Dragos-Matei | Proxy server | `proxy/proxy_server.py`, request_id, mapare id -> client, forward, erori, cleanup | cum functioneaza proxy-ul, cum se coreleaza raspunsurile, cum sunt tratate erorile |
-| Ionescu Sabina | Destination server + Docker | `destination/destination_server.py`, `docker-compose.yml`, Dockerfile-uri, operatii `echo`, `uppercase`, `delay_echo` | cum proceseaza serverul destinatie cererile si cum ruleaza serviciile in Docker |
-| Mihailescu Valter-Ioan | Client demo + documentatie | `client/demo_client.py`, README, scenariu demo live, eventual pasi Wireshark | cum se ruleaza demo-ul, cum se demonstreaza doi clienti, out-of-order si server indisponibil |
+| Membru                 | Responsabilitate principala | Livrabile                                                                                                             | Detalii                                                                                      |
+| ---------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Mincinoiu Dragos-Matei | Proxy server                | `proxy/proxy_server.py`, request_id, mapare id -> client, forward, erori, cleanup                                     | cum functioneaza proxy-ul, cum se coreleaza raspunsurile, cum sunt tratate erorile           |
+| Ionescu Sabina         | Destination server + Docker | `destination/destination_server.py`, `docker-compose.yml`, Dockerfile-uri, operatii `echo`, `uppercase`, `delay_echo` | cum proceseaza serverul destinatie cererile si cum ruleaza serviciile in Docker              |
+| Mihailescu Valter-Ioan | Client demo + documentatie  | `client/demo_client.py`, README, scenariu demo live, eventual pasi Wireshark                                          | cum se ruleaza demo-ul, cum se demonstreaza doi clienti, out-of-order si server indisponibil |
 
 ---
 
@@ -185,10 +185,10 @@ Dupa inceperea implementarii, protocolul JSON se modifica doar daca sunt de acor
 
 Primul obiectiv este sa existe o integrare minima intre cele trei componente:
 
-| Membru | Primul milestone |
-|---|---|
-| Mincinoiu Dragos-Matei | proxy-ul porneste si raspunde la `proxy_ping` |
-| Ionescu Sabina | destination server porneste si raspunde la `echo` |
+| Membru                 | Primul milestone                                            |
+| ---------------------- | ----------------------------------------------------------- |
+| Mincinoiu Dragos-Matei | proxy-ul porneste si raspunde la `proxy_ping`               |
+| Ionescu Sabina         | destination server porneste si raspunde la `echo`           |
 | Mihailescu Valter-Ioan | clientul trimite o cerere catre proxy si afiseaza raspunsul |
 
 Dupa acest milestone, se leaga fluxul complet:
